@@ -312,6 +312,7 @@ class TestFX(JitTestCase):
             # For each instruction, create a triple
             # (instruction_name : str, inputs : List[str], output : str)
             # to feed into the C++ interpreter
+            outputue_name : Optional[str] = None
             for n in mod.graph.nodes:
                 target, args, out_name = n.target, n.args, n.name
                 assert len(n.kwargs) == 0, "kwargs currently not supported"
@@ -335,9 +336,11 @@ class TestFX(JitTestCase):
                         else:
                             arg_names.append(arg.name)
                     instructions.append((target_to_name[target], arg_names, out_name))
-
+                elif n.op == 'output':
+                    assert isinstance(n.args[0], torch.fx.Node)
+                    outputue_name = n.args[0].name
                 else:
-                    raise RuntimeError('Unsupported opcode' + n.op)
+                    raise RuntimeError('Unsupported opcode ' + n.op)
 
             interpreter = torch.classes._TorchScriptTesting._ElementwiseInterpreter()
             # Load constants
@@ -348,7 +351,8 @@ class TestFX(JitTestCase):
             # Load instructions
             interpreter.set_instructions(instructions)
             # Specify name for single output
-            interpreter.set_output_name(mod.graph.result.name)
+            assert outputue_name
+            interpreter.set_output_name(outputue_name)
 
             # ===== Stage 3: Create a wrapper GraphModule around the interpreter =====
             class WrapperModule(torch.nn.Module):
@@ -436,6 +440,8 @@ class TestFX(JitTestCase):
         g = TaggingTracer().trace(m).graph
         g.lint(m)
         for n in g.nodes:
+            if n.op == 'output':
+                continue
             self.assertTrue(hasattr(n, 'tag'))
             self.assertEqual(n.tag, 'foo')
 
@@ -688,7 +694,8 @@ class TestFX(JitTestCase):
             0: [1],
             1: [3],
             2: [3],
-            3: []
+            3: [4],
+            4: []
         }
         for i, node in enumerate(graph.nodes):
             user_indexes = GraphManipulation.get_all_users_of(gm, i)
